@@ -1,0 +1,287 @@
+---
+title: "CSC 308 Individual R Portfolio"
+author: "Tykeara"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    highlight: tango
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.align = "center"
+)
+```
+
+---
+
+# 1. Introduction
+
+This portfolio documents my individual contributions to the CSC 308 final project as **Person 3 — Visualization Lead**. The project analyzes audio features from the Spotify `genres_v2.csv` dataset to explore patterns across music genres using the R programming environment.
+
+My primary responsibility was designing and producing all main visualizations for the team using `ggplot2`. This includes histograms, scatterplots, boxplots, and a correlation heatmap. Each visualization was built to be clean, readable, and directly tied to the team's research questions.
+
+**Research Questions this portfolio addresses:**
+
+- How are audio features like danceability, energy, and tempo distributed across the dataset?
+- Is there a relationship between energy and loudness in Spotify tracks?
+- Do different genres differ significantly in danceability?
+- Which audio features are most strongly correlated with each other?
+
+---
+
+# 2. Dataset Description
+
+The dataset used is `genres_v2.csv`, sourced from Kaggle (mrmorj, 2020). It contains Spotify track data retrieved via the Spotify Web API, with each row representing a single song and its associated audio features.
+
+**Key variables used in this analysis:**
+
+| Variable | Type | Description |
+|---|---|---|
+| `danceability` | Numeric (0–1) | How suitable a track is for dancing |
+| `energy` | Numeric (0–1) | Perceptual measure of intensity and activity |
+| `loudness` | Numeric (dB) | Overall loudness, typically –60 to 0 dB |
+| `tempo` | Numeric (BPM) | Speed of the track in beats per minute |
+| `speechiness` | Numeric (0–1) | Presence of spoken words |
+| `acousticness` | Numeric (0–1) | Confidence the track is acoustic |
+| `instrumentalness` | Numeric (0–1) | Predicts whether a track has no vocals |
+| `liveness` | Numeric (0–1) | Detects presence of a live audience |
+| `valence` | Numeric (0–1) | Musical positiveness conveyed by the track |
+| `genre` | Categorical | Genre label assigned to the track |
+
+**Source:** Spotify Web API Documentation — [developer.spotify.com](https://developer.spotify.com/documentation/web-api/reference/get-audio-features)
+
+---
+
+# 3. Methodology
+
+## 3.1 Packages Used
+
+```{r libraries}
+library(ggplot2)   # Main visualization package
+library(dplyr)     # Data manipulation
+library(ggcorrplot) # Correlation heatmap
+```
+
+## 3.2 Data Loading
+
+```{r load-data}
+spotify_df <- read.csv("genres_v2.csv", stringsAsFactors = FALSE)
+```
+
+## 3.3 Analytical Approach
+
+As Visualization Lead, my approach followed these steps:
+
+1. Load the cleaned dataset provided by Person 2
+2. Define a consistent visual theme across all plots
+3. Produce one plot per required type (histogram, scatterplot, boxplot, heatmap)
+4. Polish labels, colors, and readability for the final report
+5. Save high-resolution exports for Person 5's report document
+
+A single consistent `theme_minimal()` style was applied across all plots to ensure visual coherence throughout the report.
+
+```{r theme}
+my_theme <- theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    axis.title = element_text(size = 12)
+  )
+```
+
+---
+
+# 4. Visualizations and Results
+
+## 4.1 Histograms
+
+Histograms show the distribution of a single numeric variable across all songs. I produced three histograms covering danceability, energy, and tempo — the three most genre-defining audio features in this dataset.
+
+### Danceability
+
+```{r hist-danceability, fig.cap="Figure 1. Distribution of danceability across all tracks."}
+p1 <- ggplot(spotify_df, aes(x = danceability)) +
+  geom_histogram(bins = 40, fill = "#7F77DD", color = "white") +
+  labs(
+    title = "Distribution of danceability",
+    x = "Danceability (0–1)",
+    y = "Count"
+  ) +
+  my_theme
+
+p1
+```
+
+**Interpretation:** The distribution is roughly bell-shaped with a slight left skew, peaking around 0.75–0.80. This suggests the dataset skews toward more danceable tracks, which is consistent with Spotify's genre makeup being dominated by pop, hip-hop, and electronic music.
+
+### Energy
+
+```{r hist-energy, fig.cap="Figure 2. Distribution of energy across all tracks."}
+p2 <- ggplot(spotify_df, aes(x = energy)) +
+  geom_histogram(bins = 40, fill = "#1D9E75", color = "white") +
+  labs(
+    title = "Distribution of energy",
+    x = "Energy (0–1)",
+    y = "Count"
+  ) +
+  my_theme
+
+p2
+```
+
+**Interpretation:** Energy is broadly distributed but leans toward higher values, indicating that most tracks in the dataset are moderately to highly energetic. Very few tracks fall below 0.2, suggesting low-energy genres like classical or ambient are underrepresented.
+
+### Tempo
+
+```{r hist-tempo, fig.cap="Figure 3. Distribution of tempo (BPM) across all tracks."}
+p3 <- ggplot(spotify_df, aes(x = tempo)) +
+  geom_histogram(bins = 40, fill = "#D85A30", color = "white") +
+  labs(
+    title = "Distribution of tempo",
+    x = "Tempo (BPM)",
+    y = "Count"
+  ) +
+  my_theme
+
+p3
+```
+
+**Interpretation:** Tempo shows a roughly normal distribution centered around 120–130 BPM, which is the typical range for pop and dance music. Any secondary peaks may reflect genre-specific tempo norms, such as hip-hop (slower) or EDM (faster).
+
+---
+
+## 4.2 Scatterplot
+
+Scatterplots reveal relationships between two continuous variables. I chose energy and loudness because both are perceptual intensity measures — if a relationship exists, it would confirm that Spotify's features are internally consistent.
+
+```{r scatter, fig.cap="Figure 4. Relationship between energy and loudness with linear trend line."}
+p4 <- ggplot(spotify_df, aes(x = energy, y = loudness)) +
+  geom_point(alpha = 0.25, size = 1.2, color = "#185FA5") +
+  geom_smooth(method = "lm", color = "#D85A30", se = FALSE) +
+  labs(
+    title = "Energy vs. loudness",
+    x = "Energy (0–1)",
+    y = "Loudness (dB)"
+  ) +
+  my_theme
+
+p4
+```
+
+**Interpretation:** There is a clear positive relationship between energy and loudness — as energy increases, loudness (in dB) tends to increase as well. The trend line confirms this. Alpha transparency was applied to manage overplotting given the large number of data points.
+
+---
+
+## 4.3 Boxplot
+
+Boxplots allow comparison of a feature's distribution across multiple categories. I filtered to the top 10 most represented genres to keep the plot readable and ordered them by median danceability.
+
+```{r boxplot, fig.cap="Figure 5. Danceability distribution across top 10 genres by track count.", fig.height=6}
+top_genres <- spotify_df %>%
+  count(genre, sort = TRUE) %>%
+  slice_head(n = 10) %>%
+  pull(genre)
+
+p5 <- spotify_df %>%
+  filter(genre %in% top_genres) %>%
+  ggplot(aes(
+    x = reorder(genre, danceability, median),
+    y = danceability,
+    fill = genre
+  )) +
+  geom_boxplot(show.legend = FALSE, outlier.size = 0.5, alpha = 0.8) +
+  coord_flip() +
+  labs(
+    title = "Danceability by genre (top 10)",
+    x = "Genre",
+    y = "Danceability (0–1)"
+  ) +
+  my_theme
+
+p5
+```
+
+**Interpretation:** Genres vary noticeably in their danceability distributions. Genres at the top of the chart (highest median) are more consistently danceable, while genres at the bottom show more spread, suggesting greater variability. This confirms that genre is a meaningful predictor of danceability.
+
+---
+
+## 4.4 Correlation Heatmap
+
+The heatmap reveals pairwise correlations between all numeric audio features simultaneously, helping identify which features move together.
+
+```{r heatmap, fig.cap="Figure 6. Correlation matrix of Spotify audio features.", fig.height=7}
+num_vars <- spotify_df %>%
+  select(danceability, energy, loudness, speechiness,
+         acousticness, instrumentalness, liveness, valence, tempo)
+
+corr_matrix <- cor(num_vars, use = "complete.obs")
+
+p6 <- ggcorrplot(
+  corr_matrix,
+  method = "square",
+  type = "lower",
+  lab = TRUE,
+  lab_size = 3,
+  colors = c("#D85A30", "white", "#185FA5"),
+  title = "Correlation between audio features"
+) +
+  my_theme +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 10),  
+    axis.text.y = element_text(size = 10),
+    axis.title = element_blank()  
+  )
+
+
+p6
+```
+
+**Interpretation:** The heatmap reveals several notable relationships. Energy and loudness show the strongest positive correlation, consistent with the scatterplot finding. Energy and acousticness show a strong negative correlation — acoustic tracks tend to be lower energy. These patterns suggest Spotify's audio features capture meaningful and internally consistent musical properties.
+
+---
+
+# 5. Saving Outputs
+
+All final plots were exported as high-resolution PNG files for use in the team report.
+
+```{r save, eval=FALSE}
+ggsave("hist_danceability.png", p1, dpi = 300, width = 7, height = 4)
+ggsave("hist_energy.png",       p2, dpi = 300, width = 7, height = 4)
+ggsave("hist_tempo.png",        p3, dpi = 300, width = 7, height = 4)
+ggsave("scatter_energy_loudness.png", p4, dpi = 300, width = 7, height = 5)
+ggsave("boxplot_danceability_genre.png", p5, dpi = 300, width = 8, height = 5)
+ggsave("heatmap_correlation.png", p6, dpi = 300, width = 8, height = 7)
+```
+
+---
+
+# 6. Reflection
+
+Working as the Visualization Lead gave me hands-on experience with `ggplot2` and the logic of building informative, readable graphics. Key decisions I made throughout this project included:
+
+- Choosing `theme_minimal()` for a clean, professional look consistent across all plots
+- Using `alpha` transparency on the scatterplot to handle overplotting in a large dataset
+- Filtering boxplots to the top 10 genres to avoid an overcrowded, unreadable chart
+- Ordering boxplot categories by median value to make comparisons intuitive
+- Using a diverging color scheme (orange–white–blue) on the heatmap to clearly distinguish positive from negative correlations
+
+One challenge I encountered was loading the dataset — the working directory in R did not match the file location. I resolved this using `file.choose()` to manually select the file, and later moved it to the correct directory. This taught me the importance of understanding working directories and file paths in R.
+
+---
+
+# 7. References
+
+- mrmorj. (2020). *Dataset of songs in Spotify*. Kaggle. https://www.kaggle.com/datasets/mrmorj/dataset-of-songs-in-spotify
+
+- Spotify for Developers. (2024). *Get Track's Audio Features — Web API Reference*. https://developer.spotify.com/documentation/web-api/reference/get-audio-features
+
+- Wickham, H. (2016). *ggplot2: Elegant Graphics for Data Analysis*. Springer-Verlag New York. https://ggplot2.tidyverse.org
+
+- Wickham, H., François, R., Henry, L., & Müller, K. (2023). *dplyr: A Grammar of Data Manipulation*. https://dplyr.tidyverse.org
+
