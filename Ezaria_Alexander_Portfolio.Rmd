@@ -1,0 +1,309 @@
+---
+title: "CSC 308 Final Project — Individual R Portfolio"
+author: "Ezaria Alexander"
+date: "April 19, 2026"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    theme: readable
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
+                      fig.align = "center", fig.width = 7, fig.height = 4.2)
+```
+
+# 1. Project Overview
+
+This portfolio documents my individual contribution to the CSC 308 team project
+*Exploratory Analysis of Spotify Audio Features Across Music Genres Using R.*
+The team dataset was `genres_v2.csv` (Kaggle: mrmorj, 2020), sourced from the
+Spotify Web API. The team produced six core visualizations — three distribution
+histograms (danceability, energy, tempo), a scatter plot of energy vs. loudness,
+a boxplot of danceability across the top 10 genres, and a correlation matrix of
+all numeric audio features — and interpreted them in the context of four
+research questions concerning feature distributions, energy-loudness coupling,
+genre-level differences in danceability, and pairwise feature correlations.
+
+# 2. My Role on the Team
+
+**Primary role: Person 4 — Analysis & Interpretation Lead.**
+
+The three core responsibilities of this role were:
+
+1. **Writing explanations for each plot.** I authored the figure-by-figure
+   descriptions in Sections 5.1–5.4 of the team paper and the full Section 5.5
+   *Discussions and Interpretation*, which moves beyond describing each figure
+   to explaining *why* the pattern holds (production conventions behind the
+   energy-loudness coupling, cultural structure behind the bimodal tempo, the
+   selection bias behind the danceability skew, and the downstream
+   implications for dimensionality reduction and genre classification). I also
+   wrote the paper's *Abstract* and Section 1.1 *Background and Motivation*.
+
+2. **Identifying patterns and trends.** To make sure the claims in my prose
+   were actually supported by the data and not just visual impressions from
+   the plots, I wrote independent R code to surface the underlying structure
+   — modal bins for the danceability spike, density peaks for the bimodal
+   tempo, Pearson correlations for the energy-loudness coupling, and a
+   one-way ANOVA across the top 10 genres to test whether the danceability
+   differences were real. That code is in Sections 3 and 4 of this portfolio.
+
+3. **Connecting visuals to research questions.** Each interpretation I wrote
+   is tied back to one of the four research questions posed in Section 1.3.
+   Section 5 of this portfolio makes that mapping explicit so it is clear how
+   each figure and each statistical check answers a specific question.
+
+The R code below is the original code I authored in service of those
+responsibilities. It is not a re-run of the team's final visualization
+pipeline; it is the pattern-identification and verification code I wrote so
+that the explanations in Sections 5.1–5.5 of the paper could be stated with
+confidence.
+
+# 3. Data Loading and Preprocessing Review
+
+```{r load}
+library(dplyr)
+library(ggplot2)
+
+spotify_df <- read.csv("genres_v2.csv", stringsAsFactors = FALSE)
+
+# Overall shape
+dim(spotify_df)
+length(unique(spotify_df$genre))
+```
+
+## 3.1 Missing-value audit
+
+The paper needed a clear statement about data completeness before we could
+justify using `filter()` to drop incomplete rows. I ran a per-column NA audit
+rather than relying on a single `sum(is.na())` call, because missingness
+patterns matter for which features we can interpret safely.
+
+```{r na-audit}
+na_counts <- colSums(is.na(spotify_df))
+na_report <- data.frame(
+  feature = names(na_counts),
+  n_missing = as.integer(na_counts),
+  pct_missing = round(100 * na_counts / nrow(spotify_df), 3)
+) |> arrange(desc(n_missing))
+
+na_report
+```
+
+## 3.2 Duplicate-track audit
+
+Spotify catalog exports frequently contain the same track ID repeated across
+playlist-based pulls. If duplicates were present at a meaningful rate, the
+energy, danceability, and tempo histograms would overweight whichever genres
+were scraped more aggressively. I checked this before signing off on the
+histograms.
+
+```{r dupes}
+if ("id" %in% names(spotify_df)) {
+  n_total <- nrow(spotify_df)
+  n_unique_ids <- length(unique(spotify_df$id))
+  cat("Total rows:", n_total, "\n")
+  cat("Unique track IDs:", n_unique_ids, "\n")
+  cat("Duplicated ID rows:", n_total - n_unique_ids, "\n")
+}
+```
+
+## 3.3 Range / sanity check on numeric features
+
+Several Spotify features are documented as bounded to [0, 1] (danceability,
+energy, valence, acousticness, speechiness, instrumentalness, liveness). I
+confirmed that the dataset actually respects those bounds — an important check
+before interpreting any "peaks near 0.78" or "skews above 0.75" statements in
+the discussion section.
+
+```{r range-check}
+bounded_features <- c("danceability", "energy", "valence",
+                      "acousticness", "speechiness",
+                      "instrumentalness", "liveness")
+
+bounded_features <- bounded_features[bounded_features %in% names(spotify_df)]
+
+range_report <- sapply(spotify_df[bounded_features], function(x) {
+  c(min = min(x, na.rm = TRUE),
+    max = max(x, na.rm = TRUE),
+    mean = round(mean(x, na.rm = TRUE), 3))
+})
+
+t(range_report)
+```
+
+## 3.4 Genre representation
+
+The paper filters to the top 10 most represented genres for the boxplot. I
+wanted to see the full genre distribution to justify that cutoff — i.e., to
+confirm that a long tail of sparsely represented genres exists and would have
+distorted the comparison if included.
+
+```{r genre-counts}
+genre_counts <- spotify_df |>
+  count(genre, name = "n_tracks") |>
+  arrange(desc(n_tracks))
+
+genre_counts
+```
+
+# 4. Statistical Backing for the Section 5.5 Interpretations
+
+Each subsection below corresponds to a claim I made in Section 5.5. The goal
+was not to produce new visualizations (the team had those) but to compute the
+underlying numbers so my prose claims were defensible.
+
+## 4.1 Figure 1 claim — "notable spike near 0.78"
+
+In Section 5.5 I described a pronounced peak in the danceability histogram
+around 0.78. I verified this with a targeted summary rather than eyeballing
+the plot.
+
+```{r dance-peak}
+dance <- spotify_df$danceability[!is.na(spotify_df$danceability)]
+
+summary(dance)
+
+# Where is the modal bin at ~0.01 resolution?
+breaks <- seq(0, 1, by = 0.01)
+bin_counts <- table(cut(dance, breaks = breaks, include.lowest = TRUE))
+top_bins <- sort(bin_counts, decreasing = TRUE)[1:5]
+top_bins
+```
+
+## 4.2 Figure 2 claim — energy is right-skewed
+
+My 5.5 paragraph on Figure 2 leaned on the dataset being dominated by
+high-energy tracks (values above 0.75). I checked this numerically.
+
+```{r energy-skew}
+energy <- spotify_df$energy[!is.na(spotify_df$energy)]
+mean(energy)
+median(energy)
+mean(energy > 0.75)   # share of tracks above 0.75
+mean(energy < 0.25)   # share of tracks below 0.25
+```
+
+## 4.3 Figure 3 claim — bimodal tempo distribution
+
+The most specific interpretive claim in 5.5 is that tempo has two modes, one
+near 125–130 BPM (hip-hop family) and one near 150 BPM (techno/techhouse
+family). I confirmed bimodality by locating the density peaks directly from a
+kernel density estimate.
+
+```{r tempo-bimodal}
+tempo <- spotify_df$tempo[!is.na(spotify_df$tempo)]
+d <- density(tempo, adjust = 1)
+
+# Local maxima on the density curve
+is_peak <- c(FALSE, diff(sign(diff(d$y))) < 0, FALSE)
+peaks <- data.frame(bpm = round(d$x[is_peak], 1),
+                    density = round(d$y[is_peak], 5))
+peaks <- peaks[order(-peaks$density), ]
+head(peaks, 4)
+```
+
+## 4.4 Figure 4 claim — energy and loudness are positively related
+
+```{r energy-loudness}
+cor(spotify_df$energy, spotify_df$loudness,
+    use = "complete.obs", method = "pearson")
+```
+
+## 4.5 Figure 5 claim — genre meaningfully shifts danceability
+
+To back up the claim that genre is a meaningful predictor of danceability — as
+opposed to the boxplot simply looking different by eye — I compared group means
+across the top 10 genres with a one-way ANOVA.
+
+```{r genre-anova}
+top10 <- genre_counts$genre[1:10]
+
+sub <- spotify_df |>
+  filter(genre %in% top10) |>
+  select(genre, danceability) |>
+  filter(!is.na(danceability))
+
+aov_fit <- aov(danceability ~ genre, data = sub)
+summary(aov_fit)
+
+# Group medians, ordered
+sub |>
+  group_by(genre) |>
+  summarise(median_dance = round(median(danceability), 3),
+            iqr = round(IQR(danceability), 3),
+            n = n()) |>
+  arrange(desc(median_dance))
+```
+
+## 4.6 Figure 6 claim — strongest correlations are energy-loudness (+0.60) and energy-acousticness (-0.50)
+
+```{r corr-matrix}
+numeric_feats <- c("danceability", "energy", "loudness", "speechiness",
+                   "acousticness", "instrumentalness", "liveness",
+                   "valence", "tempo")
+numeric_feats <- numeric_feats[numeric_feats %in% names(spotify_df)]
+
+corr_mat <- cor(spotify_df[numeric_feats], use = "complete.obs")
+round(corr_mat, 2)
+
+# Extract the two pairs I called out in the paper
+round(corr_mat["energy", "loudness"], 2)
+round(corr_mat["energy", "acousticness"], 2)
+```
+
+# 5. Connecting Visuals to Research Questions
+
+A key part of my role was making sure every figure in the paper actually
+serves one of the four research questions from Section 1.3. The table below
+is the mapping I used while writing Sections 5.1–5.5, and the checks in
+Section 4 of this portfolio line up one-to-one with these.
+
+| Research Question | Figure(s) | Numerical Check (§4) | Interpretation Written |
+|---|---|---|---|
+| RQ1. How are audio features distributed across the dataset? | Fig. 1 (danceability), Fig. 2 (energy), Fig. 3 (tempo) | §4.1 modal bin; §4.2 skew share; §4.3 density peaks | §5.1 and Fig. 1–3 paragraphs in §5.5 |
+| RQ2. Is there a measurable relationship between energy and loudness? | Fig. 4 (scatter with trend line) | §4.4 Pearson r | §5.2 and Fig. 4 paragraph in §5.5 |
+| RQ3. Do music genres differ significantly in danceability? | Fig. 5 (boxplot, top 10 genres) | §4.5 one-way ANOVA + group medians | §5.3 and Fig. 5 paragraph in §5.5 |
+| RQ4. Which audio features are most strongly correlated? | Fig. 6 (correlation heatmap) | §4.6 correlation matrix | §5.4 and Fig. 6 paragraph in §5.5 |
+
+This mapping was what I used to keep the interpretation sections disciplined.
+Every paragraph I wrote in 5.5 had to answer "which research question does
+this serve?" before it was allowed in, which is also why the discussion stops
+at six figure-paragraphs rather than sprawling into unrelated commentary.
+
+# 6. Reflection and Learning Outcomes
+
+Working on the interpretation side of the paper taught me that an EDA is only
+as trustworthy as the cleaning decisions behind it. A histogram with a dramatic
+peak looks compelling on a slide, but that peak means very different things
+depending on whether the underlying dataset contains duplicate rows,
+disproportionately represented genres, or features outside their documented
+range. Writing the preprocessing-review code in Section 3 of this portfolio
+forced me to treat those threats seriously before I wrote anything
+interpretive.
+
+The ANOVA and kernel-density checks in Section 4 were also useful personally.
+In Section 5.5 I made some fairly strong claims — "tempo splits into two
+genre communities," "genre meaningfully shifts danceability" — that could have
+easily been overstated. Computing F-statistics and locating density peaks
+directly gave me numerical backing for those claims rather than relying on
+the visual impression of the figures.
+
+If I extended this work, I would pair the preprocessing review with a more
+formal sensitivity analysis: re-running each of the six figures after
+deduplicating by track ID and after down-sampling the over-represented
+electronic genres, to see which findings survive. The team's central claims
+(energy-loudness coupling, bimodal tempo, genre effect on danceability) are
+likely robust, but I would not assume so without checking.
+
+# 7. Repository and Attribution
+
+- Team repository: `CSC_308_HamptonU_Final_Project` (GitHub, public)
+- This portfolio: `Ezaria_Alexander_Portfolio.Rmd`
+- Accompanying script: `Ezaria_Alexander_Script.R`
+
+All R code in this portfolio was written by me. Narrative sections I authored
+on the team paper are the *Abstract*, Section 1.1 *Background and Motivation*,
+the figure-by-figure explanations in Sections 5.1–5.4, and the full Section
+5.5 *Discussions and Interpretation*.
