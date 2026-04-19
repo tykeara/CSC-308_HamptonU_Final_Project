@@ -1,0 +1,291 @@
+---
+author: "Makena Jelks"
+date: April 16, 2026
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    highlight: tango
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+---
+
+## Overview of Contribution
+
+This R Markdown documents my individual contribution to the team project
+**"Exploratory Analysis of Spotify Audio Features Across Music Genres Using R."**
+My primary responsibilities were:
+
+- Locating and loading the dataset
+- Performing all data cleaning and preprocessing
+- Producing summary statistics and describing the dataset for the final paper
+- Sharing the cleaned `spotify_df` object 
+
+---
+
+## 1. Data Collection
+
+### 1.1 Source
+
+The dataset was obtained from Kaggle, published by user *mrmorj* (2020) under the
+title *"Dataset of Songs in Spotify."* The data was originally extracted from the
+**Spotify Web API**, specifically the `/audio-features` endpoint, which returns
+quantitative audio metrics for individual tracks.
+
+- **Citation:** mrmorj. 2020. *Dataset of Songs in Spotify*. Kaggle.
+  https://www.kaggle.com/datasets/mrmorj/dataset-of-songs-in-spotify
+- **File used:** `genres_v2.csv`
+- **Access method:** Downloaded from Kaggle and loaded locally via `read.csv()`
+
+```{r load-data}
+# Load required libraries
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(knitr)
+
+# Load the dataset
+spotify_df_raw <- read.csv("genres_v2.csv", stringsAsFactors = FALSE)
+
+# Quick peek at structure
+cat("Dimensions (rows x cols):", nrow(spotify_df_raw), "x", ncol(spotify_df_raw), "\n")
+cat("Column names:\n")
+print(names(spotify_df_raw))
+```
+
+---
+
+## 2. Data Description (Raw)
+
+### 2.1 Basic Properties
+
+```{r raw-description}
+cat("Total tracks:", nrow(spotify_df_raw), "\n")
+cat("Total features (columns):", ncol(spotify_df_raw), "\n")
+cat("Unique genres:", length(unique(spotify_df_raw$genre)), "\n")
+cat("Genres present:\n")
+print(sort(unique(spotify_df_raw$genre)))
+```
+
+### 2.2 Missing Values (Raw Dataset)
+
+```{r missing-raw}
+missing_counts <- colSums(is.na(spotify_df_raw))
+missing_df <- data.frame(
+  Feature = names(missing_counts),
+  Missing_Count = missing_counts,
+  Missing_Pct = round(missing_counts / nrow(spotify_df_raw) * 100, 1)
+)
+kable(missing_df[missing_df$Missing_Count > 0, ], row.names = FALSE,
+      caption = "Columns with missing values in raw dataset")
+```
+
+> **Note:** Missing values appear only in `song_name`, `Unnamed: 0`, and `title` — 
+> metadata columns that are not used in our analysis. All 14 audio feature columns 
+> and the `genre` label have zero missing values.
+
+### 2.3 Duplicate Rows
+
+```{r duplicates}
+cat("Duplicate rows:", sum(duplicated(spotify_df_raw)), "\n")
+```
+
+---
+
+## 3. Data Cleaning
+
+The following steps were taken to prepare a clean `spotify_df` for team use.
+
+### Step 1 — Retain only analytical columns
+
+We drop administrative/metadata columns (`Unnamed: 0`, `type`, `id`, `uri`,
+`track_href`, `analysis_url`, `title`) that carry no analytical value. We retain
+`song_name` as a label even though it has many missing values, since it is not
+used in any computation.
+
+```{r clean-step1}
+# Columns to keep
+keep_cols <- c("danceability", "energy", "key", "loudness", "mode",
+               "speechiness", "acousticness", "instrumentalness",
+               "liveness", "valence", "tempo", "duration_ms",
+               "time_signature", "genre", "song_name")
+
+spotify_df <- spotify_df_raw %>%
+  select(all_of(keep_cols))
+
+cat("Columns after selection:", ncol(spotify_df), "\n")
+```
+
+### Step 2 — Ensure correct data types
+
+```{r clean-step2}
+# Numeric audio features
+num_features <- c("danceability", "energy", "loudness", "speechiness",
+                  "acousticness", "instrumentalness", "liveness",
+                  "valence", "tempo", "duration_ms")
+
+spotify_df <- spotify_df %>%
+  mutate(across(all_of(num_features), as.numeric),
+         key            = as.integer(key),
+         mode           = as.factor(mode),          # 0 = minor, 1 = major
+         time_signature = as.integer(time_signature),
+         genre          = as.factor(genre))
+
+cat("Data types after conversion:\n")
+print(sapply(spotify_df, class))
+```
+
+### Step 3 — Remove rows with NA in core audio features
+
+```{r clean-step3}
+before <- nrow(spotify_df)
+spotify_df <- spotify_df %>%
+  filter(complete.cases(select(., all_of(num_features))))
+after <- nrow(spotify_df)
+
+cat("Rows before:", before, "\n")
+cat("Rows after removing NA in audio features:", after, "\n")
+cat("Rows removed:", before - after, "\n")
+```
+
+### Step 4 — Remove physical outliers
+
+Loudness values above 0 dB are physically impossible for normalized tracks;
+duration of 0 ms indicates a corrupt record.
+
+```{r clean-step4}
+before <- nrow(spotify_df)
+spotify_df <- spotify_df %>%
+  filter(loudness <= 0,
+         duration_ms > 0,
+         tempo > 0)
+after  <- nrow(spotify_df)
+
+cat("Rows removed by outlier filter:", before - after, "\n")
+cat("Final cleaned dataset size:", nrow(spotify_df), "tracks\n")
+```
+
+### Step 5 — Verify final cleanliness
+
+```{r clean-step5}
+cat("Missing values in cleaned spotify_df:\n")
+print(colSums(is.na(spotify_df[, num_features])))
+cat("\nDuplicate rows:", sum(duplicated(spotify_df)), "\n")
+```
+
+---
+
+## 4. Cleaned Dataset — Summary Statistics
+
+```{r summary-stats}
+summary_tbl <- spotify_df %>%
+  select(all_of(num_features)) %>%
+  summarise(across(everything(),
+    list(
+      mean   = ~round(mean(.),   3),
+      median = ~round(median(.), 3),
+      sd     = ~round(sd(.),     3),
+      min    = ~round(min(.),    3),
+      max    = ~round(max(.),    3)
+    ),
+    .names = "{.col}__{.fn}"
+  )) %>%
+  pivot_longer(everything(),
+               names_to  = c("Feature", "Stat"),
+               names_sep = "__") %>%
+  pivot_wider(names_from = Stat, values_from = value)
+
+kable(summary_tbl, caption = "Descriptive statistics for numeric audio features")
+```
+
+### Genre Distribution
+
+```{r genre-dist}
+genre_counts <- spotify_df %>%
+  count(genre, sort = TRUE) %>%
+  rename(Count = n) %>%
+  mutate(Percent = round(Count / sum(Count) * 100, 1))
+
+kable(genre_counts, caption = "Track counts per genre")
+
+ggplot(genre_counts, aes(x = reorder(genre, Count), y = Count, fill = genre)) +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  labs(title = "Track Count per Genre",
+       x = "Genre", y = "Number of Tracks") +
+  theme_minimal()
+```
+
+---
+
+## 5. Data Dictionary
+
+```{r data-dict}
+dict <- data.frame(
+  Feature = c("danceability","energy","key","loudness","mode",
+              "speechiness","acousticness","instrumentalness","liveness",
+              "valence","tempo","duration_ms","time_signature","genre","song_name"),
+  Type = c("Numeric (0–1)","Numeric (0–1)","Integer (0–11)","Numeric (dB)",
+           "Factor (0/1)","Numeric (0–1)","Numeric (0–1)","Numeric (0–1)",
+           "Numeric (0–1)","Numeric (0–1)","Numeric (BPM)","Integer (ms)",
+           "Integer","Factor","Character"),
+  Description = c(
+    "Suitability of a track for dancing; 1.0 = most danceable",
+    "Intensity and activity; 1.0 = most energetic",
+    "Musical key (0 = C, 1 = C#, …, 11 = B)",
+    "Overall loudness in decibels; typically –60 to 0 dB",
+    "Modality: 1 = major, 0 = minor",
+    "Presence of spoken words; >0.66 = likely spoken word",
+    "Confidence the track is acoustic; 1.0 = acoustic",
+    "Probability of no vocals; >0.5 = likely instrumental",
+    "Probability of a live audience; >0.8 = likely live recording",
+    "Musical positiveness; 1.0 = happy/euphoric, 0.0 = sad/angry",
+    "Estimated tempo in beats per minute",
+    "Track duration in milliseconds",
+    "Estimated time signature (beats per bar)",
+    "Spotify genre label (15 unique values)",
+    "Track title from Spotify (partially missing — not used in analysis)"
+  )
+)
+kable(dict, caption = "Data Dictionary for spotify_df")
+```
+
+---
+
+## 6. Sharing the Cleaned Data
+
+The cleaned `spotify_df` object is saved as an `.RData` file so all team
+members can load it directly without repeating the cleaning steps.
+
+```{r save-clean, eval=FALSE}
+# Run this once to produce the shared file
+save(spotify_df, file = "spotify_df_clean.RData")
+
+# Team members load it with:
+# load("spotify_df_clean.RData")
+```
+
+---
+
+## 7. Analytical Decisions & Justifications
+
+| Decision | Justification |
+|---|---|
+| Dropped metadata columns (`id`, `uri`, etc.) | These are API identifiers with no analytical meaning |
+| Kept `song_name` despite NAs | Not used in computation; useful for spot-checking results |
+| Converted `mode` to factor | It is a binary categorical variable, not a continuous quantity |
+| Filtered `loudness > 0` | Values above 0 dB violate Spotify's normalization; only 2 such rows existed |
+| Used `genres_v2.csv` over `genres.csv` | Version 2 contains the genre label column required for all genre-level analysis |
+
+---
+
+## 8. Session Info
+
+```{r session}
+sessionInfo()
+```
