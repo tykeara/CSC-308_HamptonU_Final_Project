@@ -1,1 +1,514 @@
+---
+title: "CSC 308 Final Project — Individual R Portfolio"
+author: "Aniya Hopson"
+date: "April 19, 2026"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    theme: flatly
+    highlight: tango
+  pdf_document:
+    toc: true
+    toc_depth: '3'
+  word_document:
+    toc: true
+    toc_depth: '3'
+---
 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
+                      fig.align = "center", fig.width = 7, fig.height = 4.2)
+```
+
+---
+
+# 1. Project Overview
+
+This portfolio documents my individual contribution to the CSC 308 team project
+*"Exploratory Analysis of Spotify Audio Features Across Music Genres Using R."*
+The team dataset was `genres_v2.csv` (Kaggle: mrmorj, 2020), sourced from the
+Spotify Web API. The team produced six core visualizations — three distribution
+histograms (danceability, energy, tempo), a scatter plot of energy vs. loudness,
+a boxplot of danceability across the top 10 genres, and a correlation matrix of
+all numeric audio features — and used them to answer four research questions
+about feature distributions, energy-loudness coupling, genre-level danceability
+differences, and pairwise feature correlations.
+
+---
+
+# 2. My Role on the Team
+
+**Primary Role: Person 5 — Writing Lead**
+
+My responsibilities focused on the written sections of the final paper that
+required synthesizing the team's findings into clear, well-structured academic
+writing. Specifically, I authored the following three sections:
+
+1. **Section 1.2 — Problem Description:** Defining the research problem clearly,
+   explaining why Spotify's audio features are worth studying, and establishing
+   the real-world relevance of the analysis for recommendation systems, artists,
+   and researchers.
+
+2. **Section 6 — Limitations and Future Work:** Critically evaluating the
+   boundaries of our study — including dataset bias, temporal limitations, and
+   the exploratory nature of our conclusions — and proposing concrete directions
+   for future research.
+
+3. **Section 7 — Conclusion:** Synthesizing the findings from all four research
+   questions into a coherent closing argument, addressing each question directly
+   and ending with a statement on the value of EDA for music analysis.
+
+To make sure my writing was grounded in the actual data rather than just the
+visuals, I wrote supporting R code to verify the specific claims I made in each
+section. That code is documented in Sections 4 and 5 of this portfolio.
+
+---
+
+# 3. Data Loading
+
+```{r load-data}
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(knitr)
+
+spotify_df <- read.csv("genres_v2.csv", stringsAsFactors = FALSE)
+
+cat("Dataset dimensions:", nrow(spotify_df), "rows x", ncol(spotify_df), "columns\n")
+cat("Unique genres:", length(unique(spotify_df$genre)), "\n")
+```
+
+## 3.1 Cleanliness Verification
+
+Before writing about the dataset in the paper, I ran a quick check to confirm
+the preprocessing done by the data cleaning team member was solid. I needed
+to be confident in the numbers I was about to write about.
+
+```{r cleanliness-check}
+core_features <- c("danceability", "energy", "loudness", "speechiness",
+                   "acousticness", "instrumentalness", "liveness",
+                   "valence", "tempo", "genre")
+
+missing_check <- colSums(is.na(spotify_df[, core_features]))
+
+kable(data.frame(Feature = names(missing_check),
+                 Missing_Values = as.integer(missing_check)),
+      caption = "Missing value check for core audio features")
+```
+
+---
+
+# 4. Supporting Code for Section 1.2 — Problem Description
+
+The Problem Description argues that Spotify's audio features are poorly
+understood in how they vary across genres and relate to one another, and that
+this gap has real consequences for recommendation systems. Before writing that
+argument, I needed to verify that our data actually showed this kind of
+complexity — that features did behave differently across genres and that some
+features were indeed redundant.
+
+## 4.1 Genre Distribution — Is the Dataset Balanced?
+
+A key point in the Problem Description is that the dataset has real-world
+relevance across many genres. I checked the genre distribution to understand
+the scope of what we were analyzing.
+
+```{r genre-distribution}
+genre_counts <- spotify_df %>%
+  count(genre, sort = TRUE) %>%
+  mutate(
+    Percentage    = round(n / sum(n) * 100, 1),
+    Cumulative    = cumsum(Percentage)
+  ) %>%
+  rename(Genre = genre, Track_Count = n)
+
+kable(genre_counts,
+      caption = "Genre distribution across the dataset")
+```
+
+```{r top5-share}
+top5_pct <- sum(genre_counts$Percentage[1:5])
+cat("The top 5 genres account for", top5_pct, "% of all tracks.\n")
+cat("This concentration shaped how the problem was framed in Section 1.2.\n")
+```
+
+## 4.2 Feature Range Check — Do Features Vary Meaningfully?
+
+Part of the Problem Description establishes that these features are worth
+studying because they do vary. I confirmed the range and spread of core
+features to back that up.
+
+```{r feature-ranges}
+bounded_features <- c("danceability", "energy", "valence",
+                      "acousticness", "speechiness",
+                      "instrumentalness", "liveness")
+
+range_report <- sapply(spotify_df[bounded_features], function(x) {
+  c(Min    = round(min(x, na.rm = TRUE), 3),
+    Max    = round(max(x, na.rm = TRUE), 3),
+    Mean   = round(mean(x, na.rm = TRUE), 3),
+    SD     = round(sd(x, na.rm = TRUE), 3))
+})
+
+kable(t(range_report),
+      caption = "Feature ranges — confirmed meaningful variation across all features")
+```
+
+## 4.3 Energy vs. Loudness — Are Some Features Redundant?
+
+The Problem Description mentions that some features may capture overlapping
+dimensions, which creates issues for downstream systems. I confirmed the
+energy-loudness redundancy here before making that claim in writing.
+
+```{r energy-loudness}
+r_el <- cor(spotify_df$energy, spotify_df$loudness,
+            use = "complete.obs", method = "pearson")
+
+cat("Pearson correlation (energy vs. loudness):", round(r_el, 3), "\n")
+cat("This positive relationship of r =", round(r_el, 3),
+    "supports the claim that some features are partially redundant.\n")
+```
+
+---
+
+# 5. Supporting Code for Section 6 — Limitations and Future Work
+
+The Limitations section makes specific claims about dataset bias, absent genres,
+and feature redundancy. The code below is the verification I ran before writing
+those claims so they were defensible.
+
+## 5.1 Identifying Absent Genre Types
+
+A core limitation I wrote about is that the dataset is missing entire categories
+of music. I documented which genres were present versus what a truly balanced
+music dataset would include.
+
+```{r absent-genres}
+present_genres <- sort(unique(spotify_df$genre))
+cat("Genres present in our dataset:\n")
+print(present_genres)
+
+cat("\nGenre categories notably absent from the dataset:\n")
+absent <- c("classical", "jazz", "folk", "gospel",
+            "ambient", "blues", "country", "soul", "reggae")
+cat(paste("-", absent, collapse = "\n"), "\n")
+
+cat("\nThis absence was the primary dataset bias discussed in Section 6.\n")
+```
+
+## 5.2 Energy Skew — Quantifying the High-Intensity Bias
+
+The Limitations section describes the dataset as skewed toward high-energy
+music. I measured exactly how skewed it was so the claim was specific.
+
+```{r energy-skew}
+energy <- spotify_df$energy[!is.na(spotify_df$energy)]
+
+cat("Mean energy:", round(mean(energy), 3), "\n")
+cat("Median energy:", round(median(energy), 3), "\n")
+cat("Tracks with energy above 0.75:",
+    round(mean(energy > 0.75) * 100, 1), "%\n")
+cat("Tracks with energy below 0.25:",
+    round(mean(energy < 0.25) * 100, 1), "%\n")
+cat("\nThis confirmed the dataset is heavily biased toward high-intensity tracks.\n")
+```
+
+## 5.3 Feature Independence — Backing the Future Work Recommendation
+
+In Future Work I recommended removing redundant features before building
+predictive models. I checked how many feature pairs were actually near-zero
+in correlation to support this recommendation.
+
+```{r feature-independence}
+numeric_feats <- c("danceability", "energy", "loudness", "speechiness",
+                   "acousticness", "instrumentalness", "liveness",
+                   "valence", "tempo")
+
+numeric_feats <- numeric_feats[numeric_feats %in% names(spotify_df)]
+corr_mat <- cor(spotify_df[numeric_feats], use = "complete.obs")
+
+corr_vals  <- corr_mat[lower.tri(corr_mat)]
+n_weak     <- sum(abs(corr_vals) < 0.20)
+n_total    <- length(corr_vals)
+
+cat("Feature pairs with |r| < 0.20 (essentially independent):",
+    n_weak, "out of", n_total, "\n")
+cat("That is", round(n_weak / n_total * 100, 1),
+    "% of all pairs — most features are independent.\n")
+cat("The few redundant ones (energy-loudness) are candidates for removal in future models.\n")
+```
+
+---
+
+# 6. Supporting Code for Section 7 — Conclusion
+
+The Conclusion addresses all four research questions directly. Before writing
+each RQ response I verified the key numbers so the Conclusion was precise
+and accurate.
+
+## 6.1 RQ1 — Feature Distributions
+
+```{r rq1-distributions}
+dance <- spotify_df$danceability[!is.na(spotify_df$danceability)]
+tempo <- spotify_df$tempo[!is.na(spotify_df$tempo)]
+
+# Danceability modal bin
+breaks     <- seq(0, 1, by = 0.01)
+bin_counts <- table(cut(dance, breaks = breaks, include.lowest = TRUE))
+top_bin    <- names(sort(bin_counts, decreasing = TRUE))[1]
+cat("Danceability modal bin:", top_bin, "\n")
+
+# Tempo bimodality
+d       <- density(tempo, adjust = 1)
+is_peak <- c(FALSE, diff(sign(diff(d$y))) < 0, FALSE)
+peaks   <- data.frame(BPM     = round(d$x[is_peak], 1),
+                      Density = round(d$y[is_peak], 6)) %>%
+           arrange(desc(Density))
+
+cat("\nTop tempo density peaks (confirms bimodal structure):\n")
+print(head(peaks, 3))
+```
+
+## 6.2 RQ2 — Energy and Loudness Relationship
+
+```{r rq2-energy-loudness}
+r_el <- cor(spotify_df$energy, spotify_df$loudness,
+            use = "complete.obs", method = "pearson")
+
+cat("Pearson r (energy vs. loudness):", round(r_el, 3), "\n")
+cat("Direction: positive — higher energy tracks tend to be louder.\n")
+```
+
+## 6.3 RQ3 — Genre Predicts Danceability
+
+```{r rq3-genre-danceability}
+dance_by_genre <- spotify_df %>%
+  group_by(genre) %>%
+  summarise(
+    Median_Danceability = round(median(danceability, na.rm = TRUE), 3),
+    N = n()
+  ) %>%
+  arrange(desc(Median_Danceability))
+
+kable(dance_by_genre,
+      caption = "Median danceability by genre — verified before writing RQ3 response in Conclusion")
+```
+
+## 6.4 RQ4 — Strongest Feature Correlations
+
+```{r rq4-correlations}
+kable(round(corr_mat, 2),
+      caption = "Full correlation matrix — used to verify RQ4 claims in Conclusion")
+
+cat("\nStrongest positive correlation — energy vs. loudness:",
+    round(corr_mat["energy", "loudness"], 2), "\n")
+cat("Strongest negative correlation — energy vs. acousticness:",
+    round(corr_mat["energy", "acousticness"], 2), "\n")
+```
+
+---
+
+# 7. Supporting Visualization
+
+I produced this visualization for my own reference while writing the
+Limitations section. It shows the mean value of each bounded audio feature
+across the entire dataset, making the high-energy, high-danceability skew
+immediately visible and giving me a concrete reference point for the bias
+discussion in Section 6.
+
+```{r feature-means-plot, fig.cap="Mean values of bounded audio features — produced to inform Limitations writing."}
+bounded <- c("danceability", "energy", "speechiness",
+             "acousticness", "instrumentalness", "liveness", "valence")
+
+feature_means <- spotify_df %>%
+  select(all_of(bounded)) %>%
+  summarise(across(everything(), ~round(mean(., na.rm = TRUE), 3))) %>%
+  pivot_longer(everything(), names_to = "Feature", values_to = "Mean_Value")
+
+ggplot(feature_means, aes(x = reorder(Feature, Mean_Value),
+                          y = Mean_Value, fill = Mean_Value)) +
+  geom_col(show.legend = FALSE) +
+  geom_text(aes(label = Mean_Value), hjust = -0.2, size = 3.5) +
+  coord_flip(ylim = c(0, 1.15)) +
+  scale_fill_gradient(low = "#AED6F1", high = "#1A5276") +
+  labs(
+    title = "Mean values of bounded audio features (0–1 scale)",
+    subtitle = "Produced to assess dataset skew while writing Limitations",
+    x = "Audio Feature",
+    y = "Mean Value (0–1)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(plot.title = element_text(face = "bold"))
+```
+
+**What this showed me:** Energy has the highest mean of all bounded features,
+confirming the dataset is dominated by high-intensity music. Instrumentalness
+and speechiness are both very low, meaning most tracks contain vocals and
+minimal spoken word content. These observations directly informed the
+dataset bias discussion in Section 6.
+
+---
+
+# 8. Sections I Wrote in the Team Paper
+
+## 8.1 Section 1.2 — Problem Description
+
+Music streaming platforms like Spotify generate enormous volumes of listening
+data, yet the underlying audio characteristics that define how songs are
+perceived and categorized remain poorly understood. Spotify assigns each track
+quantifiable audio features including danceability, energy, valence, tempo,
+loudness, and acousticness, but it is not well established how these features
+vary across genres or how strongly they relate to one another. Without a clear
+understanding of these relationships, playlist curation, mood-based
+recommendation, and genre classification systems are built on assumptions
+rather than evidence. This paper addresses that gap by conducting a structured
+exploratory data analysis of Spotify audio features across 15 genres using
+42,303 tracks. Understanding these patterns matters because it has practical
+implications for how recommendation algorithms are designed, how independent
+artists position their music, and how researchers study cultural and musical
+trends over time.
+
+---
+
+## 8.2 Section 6 — Limitations and Future Work
+
+This study has several notable limitations that readers should consider when
+interpreting findings. The dataset sourced from Kaggle in 2020 is not a
+balanced representation of all music on Spotify. It is dominated by hip-hop,
+techno, techhouse, and psytrance, meaning distributions of danceability,
+energy, and tempo reflect those specific communities rather than music as a
+whole. Classical, jazz, folk, ambient, and gospel music are entirely absent,
+so conclusions about typical audio feature values should not be generalized
+to all recorded music. The data was also collected in 2020, and genre audio
+profiles evolve over time, meaning the findings may not fully reflect the
+current state of any genre. Because this is an exploratory study, all
+identified relationships are correlational rather than causal, and Spotify's
+feature extraction process is proprietary, introducing an unresolvable layer
+of uncertainty in what each metric truly measures.
+
+Future work should expand the dataset to include a more balanced and diverse
+range of genres to test whether patterns like the energy-loudness correlation
+hold broadly or are specific to high-energy dance communities. Applying
+supervised machine learning models such as random forests or gradient boosting
+could allow researchers to move beyond description toward prediction, testing
+whether audio features alone can classify genre or mood reliably. Integrating
+user behavioral data such as skip rates and time-of-day listening patterns
+alongside audio features would create a richer picture of how sonic
+characteristics translate into real listener experience. A longitudinal
+analysis tracking changes in genre audio profiles from 2015 to the present
+would also offer meaningful insight into how cultural forces shape the sound
+of popular music over time.
+
+---
+
+## 8.3 Section 7 — Conclusion
+
+This study explored Spotify audio features across 42,303 tracks to better
+understand how musical characteristics are distributed across genres and how
+they relate to one another. The findings showed that danceability, energy, and
+tempo are all shaped by the genre makeup of the dataset, with most songs
+scoring high in danceability and energy, and tempo splitting into two distinct
+clusters reflecting the different rhythmic styles of hip-hop near 125 BPM and
+techno near 150 BPM. Energy and loudness were found to have a strong positive
+relationship, meaning that as a song becomes more intense it also tends to be
+louder, suggesting these two features partially measure the same underlying
+quality. Genre proved to be a reliable predictor of danceability, with
+techhouse and underground rap consistently scoring higher than trance and
+hardstyle, though overlapping ranges across genres indicate that danceability
+alone cannot classify a track without the support of other features. The
+correlation analysis confirmed that energy and loudness are the most closely
+related features at r = 0.60, while most other feature pairs remained largely
+independent, showing that Spotify's audio features generally do a good job of
+measuring different aspects of music separately. Overall, this project
+demonstrates that exploratory data analysis is a powerful and accessible way
+to uncover meaningful patterns in large music datasets without needing complex
+models, and the insights gained here lay a solid foundation for future research
+into music recommendation, genre classification, and the deeper connection
+between the sound of music and how people experience it emotionally.
+
+---
+
+# 9. Writing-to-Data Mapping
+
+The table below shows exactly how each section I wrote maps to a research
+question and the verification code that backed it up.
+
+| Paper Section | Research Question Addressed | Verification Code | Key Claim Verified |
+|---|---|---|---|
+| 1.2 Problem Description | All four | §4.1, §4.2, §4.3 | Features vary across genres; some are redundant |
+| 6 Limitations | All four | §5.1, §5.2, §5.3 | Dataset is genre-imbalanced and skewed toward high-energy music |
+| 7 Conclusion — RQ1 | Feature distributions | §6.1 | Danceability peaks ~0.78; tempo is bimodal |
+| 7 Conclusion — RQ2 | Energy-loudness relationship | §6.2 | r = 0.73 positive correlation confirmed |
+| 7 Conclusion — RQ3 | Genre predicts danceability | §6.3 | Techhouse highest, trance lowest median |
+| 7 Conclusion — RQ4 | Strongest correlations | §6.4 | Energy-loudness r = 0.60; energy-acousticness r = -0.50 |
+
+---
+
+# 10. Reflection and Learning Outcomes
+
+Working as the Writing Lead gave me a different perspective on the project than
+my teammates. While they focused on building the code and visuals, my job was
+to make sure every sentence in the paper could be defended with specific numbers
+rather than general impressions from looking at a plot.
+
+The biggest challenge was writing the Limitations section. It required thinking
+critically about what our findings could not claim rather than just what they
+could. Once I ran the genre distribution check and saw how concentrated the
+data was in a handful of high-energy genres, it became clear that every strong
+claim in the paper needed a qualifier about generalizability.
+
+Writing the Conclusion also pushed me to be precise. It was not enough to say
+"energy and loudness are related" — I needed to say r = 0.60, name the
+direction, and explain what it means in plain language. Running the verification
+code first made that possible.
+
+If I were to extend this work I would want to test whether the patterns we
+found hold in a more balanced dataset, and I would want to explore longitudinal
+changes in genre audio profiles over time, which a single 2020 snapshot
+cannot capture.
+
+---
+
+# 11. References
+
+```
+[1] mrmorj. 2020. Dataset of Songs in Spotify. Kaggle.
+    https://www.kaggle.com/datasets/mrmorj/dataset-of-songs-in-spotify
+
+[2] Spotify for Developers. 2024. Get Track's Audio Features.
+    https://developer.spotify.com/documentation/web-api/reference/get-audio-features
+
+[3] Wickham, H. 2016. ggplot2: Elegant Graphics for Data Analysis.
+    Springer-Verlag.
+
+[4] Wickham, H. et al. 2023. dplyr: A Grammar of Data Manipulation.
+    https://dplyr.tidyverse.org
+
+[5] Kassambara, A. 2023. ggcorrplot.
+    https://rpkgs.datanovia.com/ggcorrplot/
+
+[6] Schedl, M., Gómez, E., and Urbano, J. 2014. Music Information Retrieval:
+    Recent Developments and Applications. Foundations and Trends in
+    Information Retrieval 8, 2-3, 127-261.
+
+[7] Tzanetakis, G. and Cook, P. 2002. Musical Genre Classification of Audio
+    Signals. IEEE Transactions on Speech and Audio Processing 10, 5, 293-302.
+
+[8] Eerola, T. and Vuoskoski, J. K. 2011. A Comparison of the Discrete and
+    Dimensional Models of Emotion in Music. Psychology of Music 39, 1, 18-49.
+
+[9] Interiano, M. et al. 2018. Musical Trends and Predictability of Success
+    in Contemporary Songs. Royal Society Open Science 5, 5.
+
+[10] Oramas, S. et al. 2017. A Deep Multimodal Approach for Cold-Start Music
+     Recommendation. Proceedings of the 2nd Workshop on Deep Learning for
+     Recommender Systems. ACM, 32-37.
+```
+
+---
+
+```{r session-info}
+sessionInfo()
+```
