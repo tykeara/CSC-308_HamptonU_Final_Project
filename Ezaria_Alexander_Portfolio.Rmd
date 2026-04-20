@@ -75,10 +75,7 @@ length(unique(spotify_df$genre))
 
 ## 3.1 Missing-value audit
 
-The paper needed a clear statement about data completeness before we could
-justify using `filter()` to drop incomplete rows. I ran a per-column NA audit
-rather than relying on a single `sum(is.na())` call, because missingness
-patterns matter for which features we can interpret safely.
+a per-column NA audit rather than relying on a single `sum(is.na())` call was used, because missingness patterns matter for which features we can interpret safely.
 
 ```{r na-audit}
 na_counts <- colSums(is.na(spotify_df))
@@ -93,12 +90,6 @@ na_report
 
 ## 3.2 Duplicate-track audit
 
-Spotify catalog exports frequently contain the same track ID repeated across
-playlist-based pulls. If duplicates were present at a meaningful rate, the
-energy, danceability, and tempo histograms would overweight whichever genres
-were scraped more aggressively. I checked this before signing off on the
-histograms.
-
 ```{r dupes}
 if ("id" %in% names(spotify_df)) {
   n_total <- nrow(spotify_df)
@@ -112,10 +103,7 @@ if ("id" %in% names(spotify_df)) {
 ## 3.3 Range / sanity check on numeric features
 
 Several Spotify features are documented as bounded to [0, 1] (danceability,
-energy, valence, acousticness, speechiness, instrumentalness, liveness). I
-confirmed that the dataset actually respects those bounds — an important check
-before interpreting any "peaks near 0.78" or "skews above 0.75" statements in
-the discussion section.
+energy, valence, acousticness, speechiness, instrumentalness, liveness).an important check was ensuring the data respected those biunds before interpreting any "peaks near 0.78" or "skews above 0.75" statements in the discussion section.
 
 ```{r range-check}
 bounded_features <- c("danceability", "energy", "valence",
@@ -275,35 +263,18 @@ at six figure-paragraphs rather than sprawling into unrelated commentary.
 # 6. Reflection and Learning Outcomes
 
 Working on the interpretation side of the paper taught me that an EDA is only
-as trustworthy as the cleaning decisions behind it. A histogram with a dramatic
-peak looks compelling on a slide, but that peak means very different things
-depending on whether the underlying dataset contains duplicate rows,
-disproportionately represented genres, or features outside their documented
-range. Writing the preprocessing-review code in Section 3 of this portfolio
-forced me to treat those threats seriously before I wrote anything
-interpretive.
+as trustworthy as the cleaning decisions behind it. Data is often times open to interpretation and it takes a lot of patience to understand what an underlying dataset contains.
 
-The ANOVA and kernel-density checks in Section 4 were also useful personally.
 In Section 5.5 I made some fairly strong claims — "tempo splits into two
 genre communities," "genre meaningfully shifts danceability" — that could have
-easily been overstated. Computing F-statistics and locating density peaks
-directly gave me numerical backing for those claims rather than relying on
-the visual impression of the figures.
+easily been overstated. If i were to extend this work, i would work more with formal sensitivity analysis. this would show how different findings survive.
 
-If I extended this work, I would pair the preprocessing review with a more
-formal sensitivity analysis: re-running each of the six figures after
-deduplicating by track ID and after down-sampling the over-represented
-electronic genres, to see which findings survive. The team's central claims
-(energy-loudness coupling, bimodal tempo, genre effect on danceability) are
-likely robust, but I would not assume so without checking.
+
 
 # 7. Repository and Attribution
 
 - Team repository: `CSC_308_HamptonU_Final_Project` (GitHub, public)
 - This portfolio: `Ezaria_Alexander_Portfolio.Rmd`
-- Accompanying script: `Ezaria_Alexander_Script.R`
 
 All R code in this portfolio was written by me. Narrative sections I authored
-on the team paper are the *Abstract*, Section 1.1 *Background and Motivation*,
-the figure-by-figure explanations in Sections 5.1–5.4, and the full Section
-5.5 *Discussions and Interpretation*.
+on the team paper are the introductions and the full Section 5.5 *Discussions and Interpretation*.
